@@ -94,9 +94,8 @@ class MelodyManager(private val context: Context, private val scope: CoroutineSc
         job = scope.launch(Dispatchers.IO) {
             delay(1200) // let the audio profiles finish connecting first
             try {
-                val s = d.createRfcommSocketToServiceRecord(UUID.fromString(MelodyProtocol.SERVICE_UUID))
                 adapter?.cancelDiscovery()
-                s.connect()
+                val s = openSocket(d, brandFor(name))
                 socket = s
                 output = s.outputStream
                 _state.update { it?.copy(connection = MelodyState.Connection.CONNECTED, error = null) }
@@ -125,19 +124,38 @@ class MelodyManager(private val context: Context, private val scope: CoroutineSc
         device?.let { d -> job?.cancel(); closeSocket(); attach(d) }
     }
 
+    /** OnePlus buds answer on their own UUID first; everything falls back to the shared one. */
+    @SuppressLint("MissingPermission")
+    private fun openSocket(d: BluetoothDevice, brand: MelodyState.Brand): BluetoothSocket {
+        val uuids = if (brand == MelodyState.Brand.ONEPLUS)
+            listOf(MelodyProtocol.SERVICE_UUID_ONEPLUS, MelodyProtocol.SERVICE_UUID)
+        else listOf(MelodyProtocol.SERVICE_UUID, MelodyProtocol.SERVICE_UUID_ONEPLUS)
+        var last: IOException? = null
+        for (u in uuids) {
+            val s = d.createRfcommSocketToServiceRecord(UUID.fromString(u))
+            try {
+                s.connect()
+                return s
+            } catch (e: IOException) {
+                last = e
+                try { s.close() } catch (_: IOException) {}
+            }
+        }
+        throw last ?: IOException("No control channel")
+    }
+
     private fun handshake() {
+        val brand = _state.value?.brand ?: MelodyState.Brand.ONEPLUS
+        send(MelodyProtocol.Cmd.SUBSCRIBE, MelodyProtocol.subscribe(brand))
         send(MelodyProtocol.Cmd.ANC_REQ, MelodyProtocol.ancModeReq())
         send(MelodyProtocol.Cmd.ANC_REQ, MelodyProtocol.ancCycleReq())
         send(
             MelodyProtocol.Cmd.MISC_REQ,
-            MelodyProtocol.miscReq(MelodyProtocol.Misc.LDAC, MelodyProtocol.Misc.MULTIPOINT, MelodyProtocol.Misc.GAME_MODE),
-        )
-        send(
-            MelodyProtocol.Cmd.SUBSCRIBE,
-            MelodyProtocol.subscribe(
-                MelodyProtocol.Subscription.BATTERY, MelodyProtocol.Subscription.ANC, MelodyProtocol.Subscription.GAME_MODE,
+            MelodyProtocol.miscReq(
+                MelodyProtocol.Misc.LDAC, MelodyProtocol.Misc.MULTIPOINT, MelodyProtocol.Misc.GAME_MODE, MelodyProtocol.Misc.AUTO_PAUSE,
             ),
         )
+        send(MelodyProtocol.Cmd.WEAR_REQ)
         send(MelodyProtocol.Cmd.TOUCH_REQ, MelodyProtocol.touchReq())
         send(MelodyProtocol.Cmd.FIRMWARE_REQ)
         send(MelodyProtocol.Cmd.BATTERY_REQ)
@@ -185,19 +203,22 @@ class MelodyManager(private val context: Context, private val scope: CoroutineSc
 
     // ---- Commands --------------------------------------------------------------------
 
-    fun setAnc(mode: MelodyAnc) {
-        _state.update { it?.copy(anc = mode, ancRaw = mode.code) }
-        send(MelodyProtocol.Cmd.ANC_SET, MelodyProtocol.ancModeSet(mode))
+    fun setAnc(mode: MelodyAnc, level: AncLevel? = null) {
+        val brand = _state.value?.brand ?: return
+        _state.update { it?.copy(anc = mode, ancLevel = level ?: it.ancLevel) }
+        send(MelodyProtocol.Cmd.ANC_SET, MelodyProtocol.ancModeSet(mode, brand, level))
     }
 
     fun setCycleMask(mask: Int) {
+        val brand = _state.value?.brand ?: return
         _state.update { it?.copy(cycleMask = mask) }
-        send(MelodyProtocol.Cmd.ANC_SET, MelodyProtocol.ancCycleSet(mask))
+        send(MelodyProtocol.Cmd.ANC_SET, MelodyProtocol.ancCycleSet(mask, brand))
     }
 
     fun setLdac(on: Boolean) = setMisc(MelodyProtocol.Misc.LDAC, on) { copy(ldac = on) }
     fun setMultipoint(on: Boolean) = setMisc(MelodyProtocol.Misc.MULTIPOINT, on) { copy(multipoint = on) }
     fun setGameMode(on: Boolean) = setMisc(MelodyProtocol.Misc.GAME_MODE, on) { copy(gameMode = on) }
+    fun setAutoPause(on: Boolean) = setMisc(MelodyProtocol.Misc.AUTO_PAUSE, on) { copy(autoPause = on) }
 
     private fun setMisc(type: Int, on: Boolean, update: MelodyState.() -> MelodyState) {
         _state.update { it?.update() }
@@ -223,7 +244,8 @@ class MelodyManager(private val context: Context, private val scope: CoroutineSc
     @SuppressLint("MissingPermission")
     private fun isSupported(d: BluetoothDevice): Boolean {
         val uuids = try { d.uuids } catch (_: SecurityException) { null }
-        if (uuids?.any { it.uuid.toString().equals(MelodyProtocol.SERVICE_UUID, true) } == true) return true
+        val ours = setOf(MelodyProtocol.SERVICE_UUID, MelodyProtocol.SERVICE_UUID_ONEPLUS)
+        if (uuids?.any { u -> ours.any { it.equals(u.uuid.toString(), true) } } == true) return true
         return NAME_PATTERN.containsMatchIn(safeName(d).orEmpty())
     }
 

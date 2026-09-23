@@ -89,10 +89,13 @@ fun HomeScreen(
     val resumeTick = com.airsink.ui.components.rememberResumeTick()
     val hasBluetooth = remember(resumeTick, headphones) { Permissions.hasBluetooth(context) }
 
-    // Sonos speakers also advertise AirPlay; show them once, under Sonos, with full controls.
+    val sonosStatus by graph.sonos.status.collectAsState()
+
+    // Sonos speakers also advertise AirPlay; once their Sonos room shows up, list them there
+    // with the full controls instead. Until then they stay here so they're always reachable.
     val sonosNames = sonos.flatMap { g -> g.members.map { it.room } }.toSet()
     val speakers = airplay.values
-        .filter { it.kind != AirPlayKind.SONOS && it.name !in sonosNames }
+        .filter { it.name !in sonosNames }
         .sortedWith(compareBy({ it.kind.ordinal }, { it.name }))
 
     IosScaffold(
@@ -151,7 +154,7 @@ fun HomeScreen(
 
         item(key = "sonosHeader") { SectionHeader("Sonos") }
         if (sonos.isEmpty()) {
-            item { SearchingCard("Looking for Sonos speakers…") }
+            item { SearchingCard(sonosStatus ?: "Looking for Sonos speakers…") }
         } else {
             sonos.chunked(2).forEach { pair ->
                 item(key = "sonos-" + pair.joinToString { it.coordinator.uuid }) {

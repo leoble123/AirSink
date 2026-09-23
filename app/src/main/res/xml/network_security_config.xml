@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sonos speakers only speak plain HTTP (port 1400) on the local network, and album art
+     comes from the speaker too. Android blocks cleartext by default, which silently broke
+     every Sonos request. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

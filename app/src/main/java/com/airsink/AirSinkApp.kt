@@ -11,6 +11,7 @@ import com.airsink.sonos.SonosDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** App-wide singletons. Small enough that a DI framework would be overkill. */
 class AppGraph(app: Application) {
@@ -21,6 +22,17 @@ class AppGraph(app: Application) {
     val airplay = AirPlayDiscovery(app)
     val sonos = SonosDiscovery(app, scope)
     val cast = CastManager(app, scope, prefs)
+
+    init {
+        // Sonos speakers that advertise AirPlay also answer Sonos's own control API on the
+        // same address, so AirPlay discovery doubles as a second way to find them.
+        scope.launch {
+            airplay.devices.collect { devices ->
+                val hosts = devices.values.filter { it.kind == com.airsink.airplay.AirPlayKind.SONOS }.map { it.host }
+                if (hosts.isNotEmpty()) sonos.addHosts(hosts)
+            }
+        }
+    }
 }
 
 class AirSinkApp : Application() {

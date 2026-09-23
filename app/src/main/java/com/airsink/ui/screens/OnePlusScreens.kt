@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -36,7 +37,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.airsink.LocalActions
 import com.airsink.LocalGraph
+import com.airsink.melody.AncLevel
 import com.airsink.melody.Gesture
+import com.airsink.melody.MelodyProtocol
+import com.airsink.melody.WearState
 import com.airsink.melody.MelodyAnc
 import com.airsink.melody.MelodyBattery
 import com.airsink.melody.MelodyState
@@ -103,9 +107,14 @@ private fun statusText(state: MelodyState) = when (state.connection) {
 private fun MelodyBatteries(state: MelodyState, ringSize: Int) {
     fun lvl(b: MelodyBattery?) = b?.level
     fun chg(b: MelodyBattery?) = b?.charging == true
+    fun label(side: String, w: WearState?) = when (w) {
+        WearState.IN_EAR -> "$side · In Ear"
+        WearState.IN_CASE -> "$side · In Case"
+        else -> side
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        BatteryRing(lvl(state.left), chg(state.left), "Left", size = ringSize.dp) { OnePlusBudArt(false, size = (ringSize * 0.45f).dp) }
-        BatteryRing(lvl(state.right), chg(state.right), "Right", size = ringSize.dp) { OnePlusBudArt(true, size = (ringSize * 0.45f).dp) }
+        BatteryRing(lvl(state.left), chg(state.left), label("Left", state.leftWear), size = ringSize.dp) { OnePlusBudArt(false, size = (ringSize * 0.45f).dp) }
+        BatteryRing(lvl(state.right), chg(state.right), label("Right", state.rightWear), size = ringSize.dp) { OnePlusBudArt(true, size = (ringSize * 0.45f).dp) }
         BatteryRing(lvl(state.case), chg(state.case), "Case", size = ringSize.dp) { PebbleCaseArt(size = (ringSize * 0.45f).dp) }
     }
 }
@@ -184,15 +193,31 @@ fun OnePlusScreen(onBack: () -> Unit, openGesture: (TouchSide, Gesture) -> Unit)
                     Column(Modifier.padding(12.dp)) { AncSelector(state) { graph.melody.setAnc(it) } }
                 }
             }
+            if (state.isOnePlus && state.anc == MelodyAnc.ON) {
+                item(key = "level") {
+                    Section(header = "Noise Cancellation Level", footer = "Smart adjusts to your surroundings. Levels your model doesn't have are ignored by the earbuds.") {
+                        Column(Modifier.padding(12.dp)) {
+                            SegmentedControl(
+                                options = AncLevel.entries.map { it.label },
+                                selectedIndex = AncLevel.entries.indexOf(state.ancLevel),
+                                onSelect = { graph.melody.setAnc(MelodyAnc.ON, AncLevel.entries[it]) },
+                            )
+                        }
+                    }
+                }
+            }
             item(key = "cycle") {
-                val mask = state.cycleMask ?: (MelodyAnc.ON.code or MelodyAnc.TRANSPARENCY.code)
+                fun bit(m: MelodyAnc) = MelodyProtocol.cycleBit(m, state.brand)
+                val mask = state.cycleMask ?: (bit(MelodyAnc.ON) or bit(MelodyAnc.TRANSPARENCY))
                 fun toggle(mode: MelodyAnc) {
-                    val next = mask xor mode.code
-                    if (Integer.bitCount(next) >= 2) graph.melody.setCycleMask(next)
+                    val next = mask xor bit(mode)
+                    // Keep at least two of the three basic modes in the cycle.
+                    val basics = next and (bit(MelodyAnc.OFF) or bit(MelodyAnc.ON) or bit(MelodyAnc.TRANSPARENCY))
+                    if (Integer.bitCount(basics) >= 2) graph.melody.setCycleMask(next)
                 }
                 Section(header = "Noise Control Switching", footer = "Choose the modes the noise-control gesture cycles through.") {
                     ancOrder.forEachIndexed { i, mode ->
-                        CheckRow(mode.label, mask and mode.code != 0, showSeparator = i < ancOrder.lastIndex) { toggle(mode) }
+                        CheckRow(mode.label, mask and bit(mode) != 0, showSeparator = i < ancOrder.lastIndex) { toggle(mode) }
                     }
                 }
             }
@@ -205,7 +230,7 @@ fun OnePlusScreen(onBack: () -> Unit, openGesture: (TouchSide, Gesture) -> Unit)
                     entries.forEachIndexed { i, (side, gesture) ->
                         ListRow(
                             "${side.label} · ${gesture.label}",
-                            value = TouchActions.label(state.touch[side to gesture], state.isRealme),
+                            value = TouchActions.label(state.touch[side to gesture], state.brand),
                             chevron = true,
                             showSeparator = i < entries.lastIndex,
                             onClick = { openGesture(side, gesture) },
@@ -218,6 +243,13 @@ fun OnePlusScreen(onBack: () -> Unit, openGesture: (TouchSide, Gesture) -> Unit)
                     header = "Sound & Connection",
                     footer = "LDAC streams higher quality audio when your phone supports it. Game Mode lowers latency. Dual Connection keeps the earbuds connected to two devices.",
                 ) {
+                    if (state.isOnePlus || state.autoPause != null) {
+                        ToggleRow(
+                            "Automatic Ear Detection", state.autoPause ?: true, graph.melody::setAutoPause,
+                            icon = Icons.Rounded.Hearing, iconColor = Ios.colors.green,
+                            subtitle = "Pause when you take an earbud out",
+                        )
+                    }
                     ToggleRow("LDAC High-Res Audio", state.ldac == true, graph.melody::setLdac, icon = Icons.Rounded.GraphicEq, iconColor = Ios.colors.orange, enabled = state.ldac != null)
                     ToggleRow("Game Mode", state.gameMode == true, graph.melody::setGameMode, icon = Icons.Rounded.SportsEsports, iconColor = Ios.colors.indigo, enabled = state.gameMode != null)
                     ToggleRow("Dual Connection", state.multipoint == true, graph.melody::setMultipoint, icon = Icons.Rounded.Devices, iconColor = Ios.colors.blue, enabled = state.multipoint != null, showSeparator = false)
@@ -258,7 +290,7 @@ fun GesturePickerScreen(side: TouchSide, gesture: Gesture, onBack: () -> Unit) {
     val s = state
     IosScaffold(title = "${side.label} ${gesture.label}", onBack = onBack, backLabel = "Back", largeTitle = false) {
         if (s == null) return@IosScaffold
-        val options = TouchActions.all(s.isRealme, s.supportsAnc)
+        val options = TouchActions.all(s.brand, s.supportsAnc)
         val current = s.touch[side to gesture]
         item {
             Section(footer = "Changes are sent to your earbuds right away.") {

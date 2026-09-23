@@ -45,12 +45,20 @@ class SonosDiscovery(private val context: Context, private val scope: CoroutineS
     private val _groups = MutableStateFlow<List<SonosGroup>>(emptyList())
     val groups: StateFlow<List<SonosGroup>> = _groups.asStateFlow()
 
+    private val _status = MutableStateFlow<String?>(null)
+    /** Human-readable detail when speakers were seen but couldn't be read, for the empty state. */
+    val status: StateFlow<String?> = _status.asStateFlow()
+
+    private val nsd = context.getSystemService(android.net.nsd.NsdManager::class.java)
+    private var mdnsListener: android.net.nsd.NsdManager.DiscoveryListener? = null
+
     private val knownHosts = LinkedHashSet<String>()
     private val models = HashMap<String, String>()
     private var job: Job? = null
 
     fun start() {
         if (job?.isActive == true) return
+        startMdns()
         job = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 search()
@@ -63,6 +71,42 @@ class SonosDiscovery(private val context: Context, private val scope: CoroutineS
     fun stop() {
         job?.cancel()
         job = null
+        mdnsListener?.let { runCatching { nsd.stopServiceDiscovery(it) } }
+        mdnsListener = null
+    }
+
+    /** Hosts learned elsewhere (e.g. AirPlay adverts from Sonos speakers). */
+    fun addHosts(hosts: Collection<String>) {
+        val added = synchronized(knownHosts) { knownHosts.addAll(hosts) }
+        if (added) refresh()
+    }
+
+    /**
+     * Sonos speakers also announce themselves over Bonjour, which gets through on networks
+     * where SSDP multicast replies are filtered.
+     */
+    private fun startMdns() {
+        if (mdnsListener != null) return
+        val l = object : android.net.nsd.NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) {}
+            override fun onDiscoveryStopped(serviceType: String) {}
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { mdnsListener = null }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
+            override fun onServiceLost(info: android.net.nsd.NsdServiceInfo) {}
+            override fun onServiceFound(info: android.net.nsd.NsdServiceInfo) {
+                @Suppress("DEPRECATION")
+                nsd.resolveService(info, object : android.net.nsd.NsdManager.ResolveListener {
+                    override fun onResolveFailed(i: android.net.nsd.NsdServiceInfo, errorCode: Int) {}
+                    override fun onServiceResolved(i: android.net.nsd.NsdServiceInfo) {
+                        @Suppress("DEPRECATION")
+                        i.host?.hostAddress?.let { addHosts(listOf(it)) }
+                    }
+                })
+            }
+        }
+        mdnsListener = l
+        runCatching { nsd.discoverServices("_sonos._tcp", android.net.nsd.NsdManager.PROTOCOL_DNS_SD, l) }
+            .onFailure { mdnsListener = null }
     }
 
     fun refresh() = scope.launch(Dispatchers.IO) { search(); refreshTopology() }
@@ -104,11 +148,26 @@ class SonosDiscovery(private val context: Context, private val scope: CoroutineS
 
     private suspend fun refreshTopology() {
         val hosts = synchronized(knownHosts) { knownHosts.toList() }
-        for (host in hosts) {
-            val xml = runCatching { SonosClient(host).zoneGroupState() }.getOrNull() ?: continue
-            _groups.value = parseTopology(xml)
+        if (hosts.isEmpty()) {
+            _status.value = null
             return
         }
+        var lastError: Throwable? = null
+        for (host in hosts) {
+            val result = runCatching { SonosClient(host).zoneGroupState() }
+            val xml = result.getOrNull()
+            if (xml == null) {
+                lastError = result.exceptionOrNull()
+                continue
+            }
+            val groups = parseTopology(xml)
+            _groups.value = groups
+            _status.value = if (groups.isEmpty()) "Found Sonos at $host, but it reported no rooms." else null
+            return
+        }
+        Log.w(TAG, "No Sonos answered topology", lastError)
+        _status.value = "Found Sonos at ${hosts.first()}, but couldn't read its rooms" +
+            (lastError?.message?.let { ": $it" } ?: ".")
     }
 
     private fun parseTopology(xml: String): List<SonosGroup> {
