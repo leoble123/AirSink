@@ -17,6 +17,7 @@ import com.airsink.airpods.Battery
 import com.airsink.airpods.HeadphonesState
 import com.airsink.core.Permissions
 import com.airsink.ui.popup.PopupOverlay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -40,6 +41,7 @@ class HeadphonesService : LifecycleService() {
         lifecycleScope.launch {
             graph.airpods.state
                 .map { it?.let { s -> Triple(s.name, listOf(s.left, s.right, s.case, s.headset), s.connected) } }
+                .combine(graph.melody.state.map { m -> m?.let { listOf(it.name, it.left, it.right, it.case) } }) { a, b -> a to b }
                 .distinctUntilChanged()
                 .collect {
                     getSystemService(NotificationManager::class.java)
@@ -69,7 +71,11 @@ class HeadphonesService : LifecycleService() {
             },
         )
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val melody = graph.melody.state.value
         val (title, text) = when {
+            state == null && melody != null -> melody.name to listOfNotNull(
+                melody.left?.let { "L ${it.level}%" }, melody.right?.let { "R ${it.level}%" }, melody.case?.let { "Case ${it.level}%" },
+            ).joinToString("  ·  ").ifEmpty { "Connected" }
             state == null -> "AirSink" to "Looking for your AirPods"
             state.model.hasCase -> state.name to listOfNotNull(
                 fmt("L", state.left), fmt("R", state.right), fmt("Case", state.case),

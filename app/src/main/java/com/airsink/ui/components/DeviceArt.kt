@@ -226,3 +226,78 @@ private fun DrawScope.drawGenericSpeaker(dark: Boolean) {
     drawCircle(Color.Black.copy(alpha = 0.35f), radius = w * 0.3f, center = c)
     drawCircle(Color.Black.copy(alpha = 0.45f), radius = w * 0.12f, center = Offset(size.width / 2, top + h * 0.22f))
 }
+
+// ---- OnePlus / OPPO / realme buds ----------------------------------------------------
+
+private val Obsidian = listOf(Color(0xFF4A4A4E), Color(0xFF1C1C1E), Color(0xFF0B0B0C))
+private val OnePlusRed = Color(0xFFEB0029)
+
+/** Matte stem earbuds and a pebble case, in the style of OnePlus Buds Pro. */
+@Composable
+fun OnePlusBudsArt(modifier: Modifier = Modifier, size: Dp = 120.dp, showCase: Boolean = true) {
+    Canvas(modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        if (showCase) {
+            drawPebbleCase(Offset(w * 0.5f, h * 0.74f), w * 0.5f)
+            drawDarkBud(Offset(w * 0.33f, h * 0.18f), w * 0.22f, mirrored = false)
+            drawDarkBud(Offset(w * 0.67f, h * 0.18f), w * 0.22f, mirrored = true)
+        } else {
+            drawDarkBud(Offset(w * 0.33f, h * 0.28f), w * 0.3f, mirrored = false)
+            drawDarkBud(Offset(w * 0.67f, h * 0.28f), w * 0.3f, mirrored = true)
+        }
+    }
+}
+
+@Composable
+fun OnePlusBudArt(mirrored: Boolean, modifier: Modifier = Modifier, size: Dp = 28.dp) {
+    Canvas(modifier.size(size)) { drawDarkBud(Offset(this.size.width / 2, this.size.height * 0.22f), this.size.width * 0.8f, mirrored) }
+}
+
+@Composable
+fun PebbleCaseArt(modifier: Modifier = Modifier, size: Dp = 28.dp) {
+    Canvas(modifier.size(size)) { drawPebbleCase(center, this.size.width * 0.9f) }
+}
+
+private fun DrawScope.drawDarkBud(top: Offset, width: Float, mirrored: Boolean) {
+    scale(if (mirrored) -1f else 1f, 1f, pivot = top) {
+        val head = width * 0.62f
+        val stemW = width * 0.22f
+        // Stem with the glossy "touch" panel
+        drawRoundRect(
+            Brush.horizontalGradient(Obsidian, startX = top.x, endX = top.x + stemW * 2),
+            topLeft = Offset(top.x + head * 0.1f, top.y + head * 0.5f),
+            size = Size(stemW, width * 0.9f),
+            cornerRadius = CornerRadius(stemW / 2),
+        )
+        drawRoundRect(
+            Color.White.copy(alpha = 0.18f),
+            topLeft = Offset(top.x + head * 0.1f + stemW * 0.3f, top.y + head * 0.8f),
+            size = Size(stemW * 0.4f, width * 0.35f),
+            cornerRadius = CornerRadius(stemW),
+        )
+        drawOval(
+            Brush.radialGradient(Obsidian, center = Offset(top.x - head * 0.15f, top.y + head * 0.25f), radius = head),
+            topLeft = Offset(top.x - head / 2, top.y),
+            size = Size(head, head * 0.9f),
+        )
+        // Silicone tip
+        drawOval(
+            Color(0xFF2C2C2E),
+            topLeft = Offset(top.x - head * 0.52f, top.y + head * 0.28f),
+            size = Size(head * 0.28f, head * 0.36f),
+        )
+    }
+}
+
+private fun DrawScope.drawPebbleCase(center: Offset, width: Float) {
+    val h = width * 0.66f
+    val topLeft = Offset(center.x - width / 2, center.y - h / 2)
+    drawRoundRect(
+        Brush.verticalGradient(Obsidian, startY = topLeft.y, endY = topLeft.y + h),
+        topLeft = topLeft, size = Size(width, h), cornerRadius = CornerRadius(h * 0.5f),
+    )
+    drawLine(Color.Black.copy(alpha = 0.6f), Offset(topLeft.x + width * 0.05f, topLeft.y + h * 0.42f), Offset(topLeft.x + width * 0.95f, topLeft.y + h * 0.42f), strokeWidth = width * 0.012f)
+    drawRoundRect(Color.White.copy(alpha = 0.10f), Offset(topLeft.x + width * 0.12f, topLeft.y + h * 0.08f), Size(width * 0.76f, h * 0.16f), CornerRadius(h))
+    drawCircle(OnePlusRed, radius = width * 0.025f, center = Offset(center.x, topLeft.y + h * 0.62f))
+}

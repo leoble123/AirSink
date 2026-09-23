@@ -38,7 +38,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.airsink.cast.CastTarget
 import com.airsink.core.Permissions
+import com.airsink.melody.Gesture
+import com.airsink.melody.TouchSide
 import com.airsink.ui.screens.AirPodsScreen
+import com.airsink.ui.screens.GesturePickerScreen
+import com.airsink.ui.screens.OnePlusScreen
 import com.airsink.ui.screens.HomeScreen
 import com.airsink.ui.screens.OnboardingScreen
 import com.airsink.ui.screens.SettingsScreen
@@ -66,6 +70,7 @@ class MainActivity : ComponentActivity(), AppActions {
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (Permissions.hasBluetooth(this)) {
             graph.airpods.start()
+            graph.melody.start()
             graph.airpods.startScan(lowLatency = true)
             HeadphonesService.start(this)
         }
@@ -157,7 +162,7 @@ class MainActivity : ComponentActivity(), AppActions {
         if (Build.VERSION.SDK_INT < 33) { openBluetoothSettings(); return }
         val cdm = getSystemService(CompanionDeviceManager::class.java)
         val filter = BluetoothDeviceFilter.Builder()
-            .setNamePattern(Pattern.compile("(?i).*(airpods|beats|powerbeats).*"))
+            .setNamePattern(Pattern.compile("(?i).*(airpods|beats|powerbeats|oneplus|nord buds|enco|realme buds).*"))
             .build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(false).build()
         cdm.associate(request, mainExecutor, object : CompanionDeviceManager.Callback() {
@@ -166,7 +171,7 @@ class MainActivity : ComponentActivity(), AppActions {
             }
 
             override fun onFailure(error: CharSequence?) {
-                Toast.makeText(this@MainActivity, "Put your AirPods in pairing mode: open the case and hold the button on the back.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Put your earbuds in pairing mode: open the case and hold its button.", Toast.LENGTH_LONG).show()
             }
         })
     }
@@ -211,12 +216,21 @@ private fun AppNavigation(startOnboarding: Boolean) {
         composable("home") {
             HomeScreen(
                 openHeadphones = { nav.navigate("airpods") },
+                openOnePlus = { nav.navigate("oneplus") },
                 openSpeaker = { id -> nav.navigate("airplay/${Uri.encode(id)}") },
                 openSonos = { uuid -> nav.navigate("sonos/${Uri.encode(uuid)}") },
                 openSettings = { nav.navigate("settings") },
             )
         }
         composable("airpods") { AirPodsScreen(onBack = { nav.popBackStack() }) }
+        composable("oneplus") {
+            OnePlusScreen(onBack = { nav.popBackStack() }, openGesture = { side, g -> nav.navigate("oneplus/gesture/${side.name}/${g.name}") })
+        }
+        composable("oneplus/gesture/{side}/{gesture}") {
+            val side = TouchSide.valueOf(it.arguments?.getString("side") ?: "LEFT")
+            val gesture = Gesture.valueOf(it.arguments?.getString("gesture") ?: "DOUBLE_TAP")
+            GesturePickerScreen(side, gesture, onBack = { nav.popBackStack() })
+        }
         composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
         composable("airplay/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
             SpeakerScreen(it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })

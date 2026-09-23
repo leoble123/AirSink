@@ -6,6 +6,7 @@ import com.airsink.airpods.AirPodsManager
 import com.airsink.cast.CastManager
 import com.airsink.core.Permissions
 import com.airsink.core.Prefs
+import com.airsink.melody.MelodyManager
 import com.airsink.sonos.SonosDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ class AppGraph(app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val prefs = Prefs(app)
     val airpods = AirPodsManager(app, scope, prefs)
+    val melody = MelodyManager(app, scope)
     val airplay = AirPlayDiscovery(app)
     val sonos = SonosDiscovery(app, scope)
     val cast = CastManager(app, scope, prefs)
@@ -30,6 +32,7 @@ class AirSinkApp : Application() {
         graph = AppGraph(this)
         if (Permissions.hasBluetooth(this)) {
             graph.airpods.start()
+            graph.melody.start()
             HeadphonesService.start(this)
         }
     }

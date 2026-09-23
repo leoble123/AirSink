@@ -72,6 +72,7 @@ import com.airsink.ui.theme.Ios
 @Composable
 fun HomeScreen(
     openHeadphones: () -> Unit,
+    openOnePlus: () -> Unit,
     openSpeaker: (String) -> Unit,
     openSonos: (String) -> Unit,
     openSettings: () -> Unit,
@@ -80,6 +81,7 @@ fun HomeScreen(
     val actions = LocalActions.current
     val context = LocalContext.current
     val headphones by graph.airpods.state.collectAsState()
+    val melody by graph.melody.state.collectAsState()
     val airplay by graph.airplay.devices.collectAsState()
     val sonos by graph.sonos.groups.collectAsState()
     val active by graph.cast.active.collectAsState()
@@ -103,7 +105,9 @@ fun HomeScreen(
 
         item(key = "headphones") {
             SectionHeader("Headphones")
-            HeadphonesCard(headphones, onOpen = openHeadphones)
+            // Skip the "no AirPods" placeholder when other earbuds are connected.
+            if (headphones != null || melody == null) HeadphonesCard(headphones, onOpen = openHeadphones)
+            melody?.let { MelodyCard(it, onOpen = openOnePlus) }
         }
 
         item(key = "streaming") {
@@ -438,7 +442,7 @@ private fun PermissionCard(onAllow: () -> Unit) {
     ) {
         Text("Allow Nearby Devices", style = Ios.type.headline, color = Ios.colors.label)
         Text(
-            "AirSink needs Bluetooth access to see your AirPods' battery and settings, and local network access to find speakers.",
+            "AirSink needs Bluetooth access to see your earbuds' battery and settings, and local network access to find speakers.",
             style = Ios.type.subheadline, color = Ios.colors.secondaryLabel,
         )
         Spacer(Modifier.height(12.dp))
